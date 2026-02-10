@@ -53,100 +53,44 @@ type User = {
 };
 
 // ---------------------------------------------------------------------------
-// Mock API layer - structured like real REST calls to:
-// http://localhost:8080/api/admin/users
+// Backend API Configuration
 // ---------------------------------------------------------------------------
 
 const API_BASE = "http://localhost:8080/api/admin/users";
 
-let mockUsers: User[] = [
-  {
-    society_id: "11111111-1111-1111-1111-111111111111",
-    user_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-    full_name: "John Admin",
-    email: "admin@example.com",
-    phone: "+91 98765 43210",
-    user_type: "ADMIN",
-    is_active: true,
-  },
-  {
-    society_id: "11111111-1111-1111-1111-111111111111",
-    user_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
-    full_name: "Meena Owner",
-    email: "meena.owner@example.com",
-    phone: "+91 90000 00001",
-    user_type: "OWNER",
-    is_active: true,
-  },
-];
-
-async function mockDelay(ms = 400) {
-  await new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 async function fetchUsers(): Promise<User[]> {
-  // In a real app you would:
-  // const res = await fetch(API_BASE);
-  // return res.json();
-  await mockDelay();
-  return structuredClone(mockUsers);
+  // Replace with your actual society ID logic later
+  const societyId = "11111111-1111-1111-1111-111111111111";
+  const res = await fetch(`${API_BASE}?societyId=${societyId}`);
+  if (!res.ok) throw new Error("Failed to fetch users");
+  return res.json();
 }
 
-type CreateUserInput = Omit<User, "user_id">;
-
-async function createUser(data: CreateUserInput): Promise<User> {
-  await mockDelay();
-
-  const newUser: User = {
-    ...data,
-    user_id:
-      typeof crypto !== "undefined" && "randomUUID" in crypto
-        ? crypto.randomUUID()
-        : Math.random().toString(36).slice(2),
-  };
-
-  mockUsers = [newUser, ...mockUsers];
-  // Simulate POST to `${API_BASE}`
-  void API_BASE;
-  return structuredClone(newUser);
+async function createUser(data: Omit<User, "user_id">): Promise<User> {
+  const res = await fetch(API_BASE, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error("Failed to create user");
+  return res.json();
 }
 
-type UpdateUserInput = Partial<Omit<User, "user_id">> & { user_id: string };
-
-async function updateUser(data: UpdateUserInput): Promise<User> {
-  await mockDelay();
-
-  const index = mockUsers.findIndex((u) => u.user_id === data.user_id);
-  if (index === -1) {
-    throw new Error("User not found");
-  }
-
-  mockUsers[index] = {
-    ...mockUsers[index],
-    ...data,
-  };
-
-  // Simulate PUT to `${API_BASE}/${data.user_id}`
-  void API_BASE;
-  return structuredClone(mockUsers[index]);
+async function updateUser(user_id: string, data: Partial<User>): Promise<User> {
+  const res = await fetch(`${API_BASE}/${user_id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error("Failed to update user");
+  return res.json();
 }
 
-async function softDeleteUser(user_id: string): Promise<User> {
-  await mockDelay();
-
-  const index = mockUsers.findIndex((u) => u.user_id === user_id);
-  if (index === -1) {
-    throw new Error("User not found");
-  }
-
-  mockUsers[index] = {
-    ...mockUsers[index],
-    is_active: false,
-  };
-
-  // Simulate DELETE (soft) to `${API_BASE}/${user_id}`
-  void API_BASE;
-  return structuredClone(mockUsers[index]);
+async function toggleUserStatus(user_id: string, active: boolean): Promise<void> {
+  const res = await fetch(`${API_BASE}/${user_id}/status?active=${active}`, {
+    method: "PATCH",
+  });
+  if (!res.ok) throw new Error("Failed to update user status");
 }
 
 // ---------------------------------------------------------------------------
@@ -154,21 +98,12 @@ async function softDeleteUser(user_id: string): Promise<User> {
 // ---------------------------------------------------------------------------
 
 const userFormSchema = z.object({
-  society_id: z
-    .string()
-    .uuid("Society ID must be a valid UUID"),
-  full_name: z
-    .string()
-    .min(2, "Full name must be at least 2 characters"),
+  society_id: z.string().uuid("Society ID must be a valid UUID"),
+  full_name: z.string().min(2, "Full name must be at least 2 characters"),
   email: z.string().email("Enter a valid email address"),
-  phone: z
-    .string()
-    .min(7, "Phone number is too short")
-    .max(20, "Phone number is too long"),
+  phone: z.string().min(7, "Phone number is too short").max(20, "Phone number is too long"),
   user_type: z.custom<UserType>(
-    (val) =>
-      typeof val === "string" &&
-      ["ADMIN", "EC", "OWNER", "TENANT", "STAFF", "SECURITY"].includes(val),
+    (val) => typeof val === "string" && ["ADMIN", "EC", "OWNER", "TENANT", "STAFF", "SECURITY"].includes(val),
     { message: "Select a valid user type" },
   ),
   is_active: z.boolean().default(true),
@@ -177,7 +112,7 @@ const userFormSchema = z.object({
 type UserFormValues = z.infer<typeof userFormSchema>;
 
 // ---------------------------------------------------------------------------
-// User Form component
+// Form Component (Stays largely the same)
 // ---------------------------------------------------------------------------
 
 type UserFormProps = {
@@ -202,149 +137,51 @@ function UserForm({ mode, initialValues, onSubmit, onCancel }: UserFormProps) {
   const isActive = watch("is_active");
 
   return (
-    <form
-      onSubmit={handleSubmit(async (values) => {
-        await onSubmit(values);
-      })}
-      className="space-y-4"
-    >
+    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-1.5">
-          <label className="block text-sm font-medium text-slate-700">
-            Society ID
-          </label>
-          <Input
-            placeholder="e.g. 11111111-1111-1111-1111-111111111111"
-            {...register("society_id")}
-            aria-invalid={!!errors.society_id}
-          />
-          {errors.society_id && (
-            <p className="text-xs text-red-600">
-              {errors.society_id.message}
-            </p>
-          )}
+          <label className="block text-sm font-medium text-slate-700">Society ID</label>
+          <Input placeholder="Society UUID" {...register("society_id")} />
+          {errors.society_id && <p className="text-xs text-red-600">{errors.society_id.message}</p>}
         </div>
-
         <div className="space-y-1.5">
-          <label className="block text-sm font-medium text-slate-700">
-            Full Name
-          </label>
-          <Input
-            placeholder="Enter full name"
-            {...register("full_name")}
-            aria-invalid={!!errors.full_name}
-          />
-          {errors.full_name && (
-            <p className="text-xs text-red-600">
-              {errors.full_name.message}
-            </p>
-          )}
+          <label className="block text-sm font-medium text-slate-700">Full Name</label>
+          <Input placeholder="Enter full name" {...register("full_name")} />
+          {errors.full_name && <p className="text-xs text-red-600">{errors.full_name.message}</p>}
         </div>
-
         <div className="space-y-1.5">
-          <label className="block text-sm font-medium text-slate-700">
-            Email
-          </label>
-          <Input
-            type="email"
-            placeholder="name@domain.com"
-            {...register("email")}
-            aria-invalid={!!errors.email}
-          />
-          {errors.email && (
-            <p className="text-xs text-red-600">
-              {errors.email.message}
-            </p>
-          )}
+          <label className="block text-sm font-medium text-slate-700">Email</label>
+          <Input type="email" placeholder="name@domain.com" {...register("email")} />
+          {errors.email && <p className="text-xs text-red-600">{errors.email.message}</p>}
         </div>
-
         <div className="space-y-1.5">
-          <label className="block text-sm font-medium text-slate-700">
-            Phone
-          </label>
-          <Input
-            placeholder="+91 98xxx xxxxx"
-            {...register("phone")}
-            aria-invalid={!!errors.phone}
-          />
-          {errors.phone && (
-            <p className="text-xs text-red-600">
-              {errors.phone.message}
-            </p>
-          )}
+          <label className="block text-sm font-medium text-slate-700">Phone</label>
+          <Input placeholder="Phone number" {...register("phone")} />
+          {errors.phone && <p className="text-xs text-red-600">{errors.phone.message}</p>}
         </div>
-
         <div className="space-y-1.5">
-          <label className="block text-sm font-medium text-slate-700">
-            User Type
-          </label>
+          <label className="block text-sm font-medium text-slate-700">User Type</label>
           <Select
             defaultValue={initialValues.user_type}
-            onValueChange={(value) =>
-              setValue("user_type", value as UserType, {
-                shouldValidate: true,
-              })
-            }
+            onValueChange={(v) => setValue("user_type", v as UserType, { shouldValidate: true })}
           >
-            <SelectTrigger
-              className="w-full"
-              aria-invalid={!!errors.user_type}
-            >
-              <SelectValue placeholder="Select user type" />
-            </SelectTrigger>
+            <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="ADMIN">Admin</SelectItem>
-              <SelectItem value="EC">EC</SelectItem>
-              <SelectItem value="OWNER">Owner</SelectItem>
-              <SelectItem value="TENANT">Tenant</SelectItem>
-              <SelectItem value="STAFF">Staff</SelectItem>
-              <SelectItem value="SECURITY">Security</SelectItem>
+              {["ADMIN", "EC", "OWNER", "TENANT", "STAFF", "SECURITY"].map(t => (
+                <SelectItem key={t} value={t}>{t}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
-          {errors.user_type && (
-            <p className="text-xs text-red-600">
-              {errors.user_type.message as string}
-            </p>
-          )}
         </div>
-
         <div className="flex items-center gap-3 pt-6">
-          <Switch
-            checked={isActive}
-            onCheckedChange={(checked) =>
-              setValue("is_active", checked, { shouldValidate: true })
-            }
-          />
-          <div className="space-y-0.5">
-            <p className="text-sm font-medium text-slate-700">Active</p>
-            <p className="text-xs text-slate-500">
-              {isActive
-                ? "User will be able to access the portal."
-                : "User will be soft-deleted and deactivated."}
-            </p>
-          </div>
+          <Switch checked={isActive} onCheckedChange={(c) => setValue("is_active", c)} />
+          <span className="text-sm font-medium">Active</span>
         </div>
       </div>
-
-      <DialogFooter className="pt-2">
-        {onCancel && (
-          <Button
-            type="button"
-            variant="outline"
-            onClick={onCancel}
-            disabled={isSubmitting}
-          >
-            Cancel
-          </Button>
-        )}
+      <DialogFooter>
+        <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
         <Button type="submit" disabled={isSubmitting}>
-          {isSubmitting
-            ? mode === "create"
-              ? "Creating..."
-              : "Saving..."
-            : mode === "create"
-            ? "Create User"
-            : "Save Changes"}
+          {mode === "create" ? "Create User" : "Save Changes"}
         </Button>
       </DialogFooter>
     </form>
@@ -352,15 +189,13 @@ function UserForm({ mode, initialValues, onSubmit, onCancel }: UserFormProps) {
 }
 
 // ---------------------------------------------------------------------------
-// Main Users Page
+// Main Page component
 // ---------------------------------------------------------------------------
 
 export default function UsersPage() {
   const queryClient = useQueryClient();
-
   const [searchTerm, setSearchTerm] = useState("");
   const [userTypeFilter, setUserTypeFilter] = useState<UserType | "ALL">("ALL");
-
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogUser, setEditDialogUser] = useState<User | null>(null);
 
@@ -370,10 +205,7 @@ export default function UsersPage() {
   });
 
   const createMutation = useMutation({
-    mutationFn: (values: UserFormValues) =>
-      createUser({
-        ...values,
-      }),
+    mutationFn: createUser,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["users"] });
       setCreateDialogOpen(false);
@@ -381,8 +213,7 @@ export default function UsersPage() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: (payload: { user_id: string; values: UserFormValues }) =>
-      updateUser({ user_id: payload.user_id, ...payload.values }),
+    mutationFn: (payload: { id: string; values: UserFormValues }) => updateUser(payload.id, payload.values),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["users"] });
       setEditDialogUser(null);
@@ -390,62 +221,33 @@ export default function UsersPage() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (user_id: string) => softDeleteUser(user_id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["users"] });
-    },
+    mutationFn: (id: string) => toggleUserStatus(id, false),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["users"] }),
   });
 
   const filteredUsers = useMemo(() => {
-    const term = searchTerm.trim().toLowerCase();
-
-    return users.filter((user) => {
-      const matchesSearch =
-        !term ||
-        user.full_name.toLowerCase().includes(term) ||
-        user.email.toLowerCase().includes(term);
-
-      const matchesType =
-        userTypeFilter === "ALL" || user.user_type === userTypeFilter;
-
+    return users.filter(u => {
+      const matchesSearch = !searchTerm || u.full_name.toLowerCase().includes(searchTerm.toLowerCase()) || u.email.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesType = userTypeFilter === "ALL" || u.user_type === userTypeFilter;
       return matchesSearch && matchesType;
     });
   }, [users, searchTerm, userTypeFilter]);
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Users</h1>
-          <p className="text-sm text-slate-500">
-            Manage society users, roles, and access.
-          </p>
+          <h1 className="text-2xl font-bold">Users</h1>
+          <p className="text-slate-500">Manage your society members.</p>
         </div>
-
         <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-          <DialogTrigger asChild>
-            <Button size="lg" className="mt-2 sm:mt-0">
-              <Plus className="mr-2 h-4 w-4" />
-              Create User
-            </Button>
-          </DialogTrigger>
+          <DialogTrigger asChild><Button><Plus className="mr-2 h-4 w-4" /> Create User</Button></DialogTrigger>
           <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Create User</DialogTitle>
-            </DialogHeader>
+            <DialogHeader><DialogTitle>Create New User</DialogTitle></DialogHeader>
             <UserForm
               mode="create"
-              initialValues={{
-                society_id: "11111111-1111-1111-1111-111111111111",
-                full_name: "",
-                email: "",
-                phone: "",
-                user_type: "OWNER",
-                is_active: true,
-              }}
-              onSubmit={async (values) => {
-                await createMutation.mutateAsync(values);
-              }}
+              initialValues={{ society_id: "11111111-1111-1111-1111-111111111111", full_name: "", email: "", phone: "", user_type: "OWNER", is_active: true }}
+              onSubmit={async (v) => { await createMutation.mutateAsync(v); }}
               onCancel={() => setCreateDialogOpen(false)}
             />
           </DialogContent>
@@ -453,171 +255,72 @@ export default function UsersPage() {
       </div>
 
       <Card>
-        <CardHeader className="border-b">
-          <CardTitle className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <span>Users</span>
-
-            <div className="flex flex-col gap-3 md:flex-row md:items-center">
-              <div className="relative w-full md:w-64">
-                <Search className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <Input
-                  placeholder="Search by name or email..."
-                  className="pl-8"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
-              </div>
-
-              <Select
-                value={userTypeFilter}
-                onValueChange={(value) =>
-                  setUserTypeFilter(value as UserType | "ALL")
-                }
-              >
-                <SelectTrigger className="w-full md:w-40">
-                  <SelectValue placeholder="Filter by type" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">All Types</SelectItem>
-                  <SelectItem value="ADMIN">Admin</SelectItem>
-                  <SelectItem value="EC">EC</SelectItem>
-                  <SelectItem value="OWNER">Owner</SelectItem>
-                  <SelectItem value="TENANT">Tenant</SelectItem>
-                  <SelectItem value="STAFF">Staff</SelectItem>
-                  <SelectItem value="SECURITY">Security</SelectItem>
-                </SelectContent>
-              </Select>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div className="flex gap-4">
+            <div className="relative w-64">
+              <Search className="absolute left-2 top-2.5 h-4 w-4 text-slate-400" />
+              <Input placeholder="Search users..." className="pl-8" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
             </div>
-          </CardTitle>
-        </CardHeader>
-
-        <CardContent className="p-0">
-          <div className="relative">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Phone</TableHead>
-                  <TableHead>User Type</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {isLoading ? (
-                  <TableRow>
-                    <TableCell colSpan={6} className="py-8 text-center">
-                      <span className="text-sm text-slate-500">
-                        Loading users...
-                      </span>
-                    </TableCell>
-                  </TableRow>
-                ) : filteredUsers.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={6} className="py-8 text-center">
-                      <span className="text-sm text-slate-500">
-                        No users found. Try adjusting your search or filters.
-                      </span>
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  filteredUsers.map((user) => (
-                    <TableRow key={user.user_id}>
-                      <TableCell className="font-medium">
-                        {user.full_name}
-                      </TableCell>
-                      <TableCell>{user.email}</TableCell>
-                      <TableCell>{user.phone}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{user.user_type}</Badge>
-                      </TableCell>
-                      <TableCell>
-                        {user.is_active ? (
-                          <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">
-                            Active
-                          </Badge>
-                        ) : (
-                          <Badge className="bg-slate-100 text-slate-600 hover:bg-slate-100">
-                            Inactive
-                          </Badge>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-2">
-                          <Dialog
-                            open={
-                              editDialogUser?.user_id === user.user_id &&
-                              !!editDialogUser
-                            }
-                            onOpenChange={(open) => {
-                              if (open) {
-                                setEditDialogUser(user);
-                              } else {
-                                setEditDialogUser(null);
-                              }
-                            }}
-                          >
-                            <DialogTrigger asChild>
-                              <Button
-                                size="xs"
-                                variant="outline"
-                                className="hidden sm:inline-flex"
-                              >
-                                <Pencil className="mr-1 h-3.5 w-3.5" />
-                                Edit
-                              </Button>
-                            </DialogTrigger>
-                            <DialogContent>
-                              <DialogHeader>
-                                <DialogTitle>Edit User</DialogTitle>
-                              </DialogHeader>
-
-                              {editDialogUser && (
-                                <UserForm
-                                  mode="edit"
-                                  initialValues={{
-                                    society_id: editDialogUser.society_id,
-                                    full_name: editDialogUser.full_name,
-                                    email: editDialogUser.email,
-                                    phone: editDialogUser.phone,
-                                    user_type: editDialogUser.user_type,
-                                    is_active: editDialogUser.is_active,
-                                  }}
-                                  onSubmit={async (values) => {
-                                    await updateMutation.mutateAsync({
-                                      user_id: editDialogUser.user_id,
-                                      values,
-                                    });
-                                  }}
-                                  onCancel={() => setEditDialogUser(null)}
-                                />
-                              )}
-                            </DialogContent>
-                          </Dialog>
-
-                          <Button
-                            size="xs"
-                            variant="destructive"
-                            disabled={
-                              deleteMutation.isPending || !user.is_active
-                            }
-                            onClick={() => deleteMutation.mutate(user.user_id)}
-                          >
-                            <Trash2 className="mr-1 h-3.5 w-3.5" />
-                            {user.is_active ? "Delete" : "Deleted"}
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
+            <Select value={userTypeFilter} onValueChange={(v) => setUserTypeFilter(v as any)}>
+              <SelectTrigger className="w-40"><SelectValue placeholder="All Types" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">All Types</SelectItem>
+                <SelectItem value="ADMIN">Admin</SelectItem>
+                <SelectItem value="OWNER">Owner</SelectItem>
+                <SelectItem value="TENANT">Tenant</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Email</TableHead>
+                <TableHead>Role</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {isLoading ? (
+                <TableRow><TableCell colSpan={5} className="text-center">Loading...</TableCell></TableRow>
+              ) : filteredUsers.map(user => (
+                <TableRow key={user.user_id}>
+                  <TableCell className="font-medium">{user.full_name}</TableCell>
+                  <TableCell>{user.email}</TableCell>
+                  <TableCell><Badge variant="outline">{user.user_type}</Badge></TableCell>
+                  <TableCell>
+                    <Badge className={user.is_active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}>
+                      {user.is_active ? "Active" : "Inactive"}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-right flex justify-end gap-2">
+                    <Button variant="outline" size="sm" onClick={() => setEditDialogUser(user)}>Edit</Button>
+                    <Button variant="destructive" size="sm" onClick={() => deleteMutation.mutate(user.user_id)} disabled={!user.is_active}>Delete</Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         </CardContent>
       </Card>
+
+      {/* Edit Dialog */}
+      <Dialog open={!!editDialogUser} onOpenChange={() => setEditDialogUser(null)}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Edit User</DialogTitle></DialogHeader>
+          {editDialogUser && (
+            <UserForm
+              mode="edit"
+              initialValues={{ ...editDialogUser }}
+              onSubmit={async (v) => { await updateMutation.mutateAsync({ id: editDialogUser.user_id, values: v }); }}
+              onCancel={() => setEditDialogUser(null)}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
-
