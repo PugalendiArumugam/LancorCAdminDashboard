@@ -4,11 +4,7 @@ import React, { useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import {
-  useQuery,
-  useMutation,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, Search } from "lucide-react";
 
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -55,9 +51,9 @@ type User = {
 
 const API_BASE = "http://localhost:8080/api/admin/users";
 
-// Helper to get headers with Auth Token
+// Senior Dev Fix: Ensure we check both session and local storage for the token
 const getHeaders = () => {
-  const token = localStorage.getItem("auth_token"); // Adjust key based on your AuthContext storage
+  const token = localStorage.getItem("token") || localStorage.getItem("auth_token");
   return {
     "Content-Type": "application/json",
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -65,14 +61,26 @@ const getHeaders = () => {
 };
 
 /**
- * Updated API functions to accept dynamic societyId and use Auth headers
+ * API function with enhanced logging
  */
 async function fetchUsers(societyId: string): Promise<User[]> {
+  console.log(`[API] Fetching users for Society ID: ${societyId}`);
+  
   const res = await fetch(`${API_BASE}?societyId=${societyId}`, {
     headers: getHeaders(),
   });
-  if (!res.ok) throw new Error("Failed to fetch users");
-  return res.json();
+
+  if (!res.ok) {
+    const err = await res.text();
+    console.error(`[API] Server Error: ${res.status}`, err);
+    throw new Error("Failed to fetch users");
+  }
+
+  const data = await res.json();
+  console.log("[API] Raw Data received:", data);
+  
+  // Logic Fix: Ensure data is an array
+  return Array.isArray(data) ? data : (data.users || []); 
 }
 
 async function createUser(data: Omit<User, "user_id">): Promise<User> {
@@ -143,12 +151,7 @@ function UserForm({ mode, initialValues, onSubmit, onCancel }: UserFormProps) {
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-1.5">
           <label className="block text-sm font-medium text-slate-700">Society ID</label>
-          <Input 
-            placeholder="Society UUID" 
-            {...register("society_id")} 
-            disabled // Keep society ID locked to the admin's society
-          />
-          {errors.society_id && <p className="text-xs text-red-600">{errors.society_id.message}</p>}
+          <Input placeholder="Society UUID" {...register("society_id")} disabled />
         </div>
         <div className="space-y-1.5">
           <label className="block text-sm font-medium text-slate-700">Full Name</label>
@@ -195,20 +198,25 @@ function UserForm({ mode, initialValues, onSubmit, onCancel }: UserFormProps) {
 }
 
 export default function UsersPage() {
-  const { user, isAuthenticated, isAdmin, isLoading: authLoading } = useAuth(); //
+  const { user, isAuthenticated, isAdmin, isLoading: authLoading } = useAuth();
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
   const [userTypeFilter, setUserTypeFilter] = useState<UserType | "ALL">("ALL");
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogUser, setEditDialogUser] = useState<User | null>(null);
 
-  /**
-   * Fetch users dynamically based on verified admin's society_id
-   */
-  const { data: users = [], isLoading: dataLoading } = useQuery<User[]>({
+  // Monitor auth state changes
+  React.useEffect(() => {
+    console.log("[UsersPage] Auth State:", { isAuthenticated, isAdmin, societyId: user?.society_id });
+  }, [isAuthenticated, isAdmin, user]);
+
+  const { data: users = [], isLoading: dataLoading, error: queryError } = useQuery<User[]>({
     queryKey: ["users", user?.society_id],
-    queryFn: () => fetchUsers(user?.society_id || ""),
-    enabled: !!user?.society_id, // Only fetch if we have a valid society ID
+    queryFn: async () => {
+      console.log("[UsersPage] fetchUsers called with society_id:", user?.society_id);
+      return fetchUsers(user?.society_id || "");
+    },
+    enabled: !!user?.society_id && isAuthenticated,
   });
 
   const createMutation = useMutation({
@@ -234,22 +242,26 @@ export default function UsersPage() {
 
   const filteredUsers = useMemo(() => {
     return users.filter(u => {
-      const matchesSearch = !searchTerm || u.full_name.toLowerCase().includes(searchTerm.toLowerCase()) || u.email.toLowerCase().includes(searchTerm.toLowerCase());
+      // Fix: Handle potential undefined fields from backend
+      const name = u.full_name || (u as any).fullName || "";
+      const email = u.email || "";
+      const matchesSearch = !searchTerm || 
+        name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+        email.toLowerCase().includes(searchTerm.toLowerCase());
       const matchesType = userTypeFilter === "ALL" || u.user_type === userTypeFilter;
       return matchesSearch && matchesType;
     });
   }, [users, searchTerm, userTypeFilter]);
 
-  // Handle loading and access control
-  if (authLoading) return <div className="p-8 text-center">Verifying session...</div>;
-  if (!isAuthenticated || !isAdmin) return <div className="p-8 text-center">Access denied. Admin role required.</div>;
+  if (authLoading) return <div className="p-8 text-center">Verifying credentials...</div>;
+  if (!isAuthenticated || !isAdmin) return <div className="p-8 text-center text-red-500">Access Denied</div>;
 
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold">Users</h1>
-          <p className="text-slate-500">Managing members for {user?.full_name}'s Society</p>
+          <p className="text-slate-500">Managing {users.length} members for Society ID: {user?.society_id}</p>
         </div>
         <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
           <DialogTrigger asChild><Button><Plus className="mr-2 h-4 w-4" /> Create User</Button></DialogTrigger>
@@ -258,7 +270,7 @@ export default function UsersPage() {
             <UserForm
               mode="create"
               initialValues={{ 
-                society_id: user?.society_id || "", // Default to logged in admin's society
+                society_id: user?.society_id || "", 
                 full_name: "", 
                 email: "", 
                 phone: "", 
@@ -271,6 +283,12 @@ export default function UsersPage() {
           </DialogContent>
         </Dialog>
       </div>
+
+      {queryError && (
+        <div className="bg-red-50 p-4 rounded-md text-red-700 text-sm">
+          Error loading users. Please check the console and ensure the backend is running.
+        </div>
+      )}
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
@@ -303,20 +321,22 @@ export default function UsersPage() {
             </TableHeader>
             <TableBody>
               {dataLoading ? (
-                <TableRow><TableCell colSpan={5} className="text-center">Loading users...</TableCell></TableRow>
-              ) : filteredUsers.map(user => (
-                <TableRow key={user.user_id}>
-                  <TableCell className="font-medium">{user.full_name}</TableCell>
-                  <TableCell>{user.email}</TableCell>
-                  <TableCell><Badge variant="outline">{user.user_type}</Badge></TableCell>
+                <TableRow><TableCell colSpan={5} className="text-center">Loading users from database...</TableCell></TableRow>
+              ) : filteredUsers.length === 0 ? (
+                <TableRow><TableCell colSpan={5} className="text-center py-10 text-slate-400">No users found for this society.</TableCell></TableRow>
+              ) : filteredUsers.map(u => (
+                <TableRow key={u.user_id}>
+                  <TableCell className="font-medium">{u.full_name || (u as any).fullName}</TableCell>
+                  <TableCell>{u.email}</TableCell>
+                  <TableCell><Badge variant="outline">{u.user_type}</Badge></TableCell>
                   <TableCell>
-                    <Badge className={user.is_active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}>
-                      {user.is_active ? "Active" : "Inactive"}
+                    <Badge className={u.is_active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}>
+                      {u.is_active ? "Active" : "Inactive"}
                     </Badge>
                   </TableCell>
                   <TableCell className="text-right flex justify-end gap-2">
-                    <Button variant="outline" size="sm" onClick={() => setEditDialogUser(user)}>Edit</Button>
-                    <Button variant="destructive" size="sm" onClick={() => deleteMutation.mutate(user.user_id)} disabled={!user.is_active}>Delete</Button>
+                    <Button variant="outline" size="sm" onClick={() => setEditDialogUser(u)}>Edit</Button>
+                    <Button variant="destructive" size="sm" onClick={() => deleteMutation.mutate(u.user_id)} disabled={!u.is_active}>Delete</Button>
                   </TableCell>
                 </TableRow>
               ))}
@@ -331,7 +351,10 @@ export default function UsersPage() {
           {editDialogUser && (
             <UserForm
               mode="edit"
-              initialValues={{ ...editDialogUser }}
+              initialValues={{ 
+                ...editDialogUser,
+                full_name: editDialogUser.full_name || (editDialogUser as any).fullName 
+              }}
               onSubmit={async (v) => { await updateMutation.mutateAsync({ id: editDialogUser.user_id, values: v }); }}
               onCancel={() => setEditDialogUser(null)}
             />

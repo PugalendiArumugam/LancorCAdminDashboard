@@ -111,7 +111,7 @@ export function LoginDialog({ open, onOpenChange }: LoginDialogProps) {
     e.preventDefault();
     e.stopPropagation();
     
-    console.log("Verify clicked, OTP:", otp, "attempts:", attempts);
+    console.log("=== VERIFY CLICKED ===", { email, otp, attempts });
     
     if (!otp.trim() || otp.length !== 6) {
       setError("Please enter a valid 6-digit OTP");
@@ -123,6 +123,8 @@ export function LoginDialog({ open, onOpenChange }: LoginDialogProps) {
     }
     setError("");
     setIsLoading(true);
+    
+    console.log("=== SENDING FETCH TO /verify-otp ===");
     
     fetch(`${API_BASE}/verify-otp`, {
       method: "POST",
@@ -151,6 +153,8 @@ export function LoginDialog({ open, onOpenChange }: LoginDialogProps) {
         }
         
         // Success - login
+        console.log("[LoginDialog] Backend response data:", data);
+        
         const authResponse: AuthResponse = {
           token: data.token || data.jwt || data.accessToken || data.data?.token || "",
           user: data.user || data.userDto || data.profile || data.data?.user || {
@@ -164,7 +168,7 @@ export function LoginDialog({ open, onOpenChange }: LoginDialogProps) {
           },
         };
         
-        console.log("Login authResponse:", authResponse);
+        console.log("[LoginDialog] Final Auth Object to be stored:", authResponse);
         login(authResponse);
         onOpenChange(false);
       });
@@ -269,7 +273,10 @@ export function LoginDialog({ open, onOpenChange }: LoginDialogProps) {
                 </Button>
                 <Button
                   type="button"
-                  onClick={handleVerifyOtp}
+                  onClick={(e) => {
+                    console.log("=== BUTTON CLICKED ===", { otp, otpLength: otp.length, isLoading, attempts });
+                    handleVerifyOtp(e as any);
+                  }}
                   disabled={isLoading || otp.length !== 6 || attempts >= MAX_ATTEMPTS}
                   className="flex-1"
                 >
