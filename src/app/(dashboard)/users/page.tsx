@@ -9,9 +9,9 @@ import {
   useMutation,
   useQueryClient,
 } from "@tanstack/react-query";
-import { Plus, Pencil, Trash2, Search } from "lucide-react";
+import { Plus, Search } from "lucide-react";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -39,6 +39,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { useAuth } from "@/context/AuthContext";
 
 type UserType = "ADMIN" | "EC" | "OWNER" | "TENANT" | "STAFF" | "SECURITY";
 
@@ -52,16 +53,24 @@ type User = {
   is_active: boolean;
 };
 
-// ---------------------------------------------------------------------------
-// Backend API Configuration
-// ---------------------------------------------------------------------------
-
 const API_BASE = "http://localhost:8080/api/admin/users";
 
-async function fetchUsers(): Promise<User[]> {
-  // Replace with your actual society ID logic later
-  const societyId = "11111111-1111-1111-1111-111111111111";
-  const res = await fetch(`${API_BASE}?societyId=${societyId}`);
+// Helper to get headers with Auth Token
+const getHeaders = () => {
+  const token = localStorage.getItem("auth_token"); // Adjust key based on your AuthContext storage
+  return {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+};
+
+/**
+ * Updated API functions to accept dynamic societyId and use Auth headers
+ */
+async function fetchUsers(societyId: string): Promise<User[]> {
+  const res = await fetch(`${API_BASE}?societyId=${societyId}`, {
+    headers: getHeaders(),
+  });
   if (!res.ok) throw new Error("Failed to fetch users");
   return res.json();
 }
@@ -69,7 +78,7 @@ async function fetchUsers(): Promise<User[]> {
 async function createUser(data: Omit<User, "user_id">): Promise<User> {
   const res = await fetch(API_BASE, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getHeaders(),
     body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error("Failed to create user");
@@ -79,7 +88,7 @@ async function createUser(data: Omit<User, "user_id">): Promise<User> {
 async function updateUser(user_id: string, data: Partial<User>): Promise<User> {
   const res = await fetch(`${API_BASE}/${user_id}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    headers: getHeaders(),
     body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error("Failed to update user");
@@ -89,13 +98,10 @@ async function updateUser(user_id: string, data: Partial<User>): Promise<User> {
 async function toggleUserStatus(user_id: string, active: boolean): Promise<void> {
   const res = await fetch(`${API_BASE}/${user_id}/status?active=${active}`, {
     method: "PATCH",
+    headers: getHeaders(),
   });
   if (!res.ok) throw new Error("Failed to update user status");
 }
-
-// ---------------------------------------------------------------------------
-// Form schema (React Hook Form + Zod)
-// ---------------------------------------------------------------------------
 
 const userFormSchema = z.object({
   society_id: z.string().uuid("Society ID must be a valid UUID"),
@@ -110,10 +116,6 @@ const userFormSchema = z.object({
 });
 
 type UserFormValues = z.infer<typeof userFormSchema>;
-
-// ---------------------------------------------------------------------------
-// Form Component (Stays largely the same)
-// ---------------------------------------------------------------------------
 
 type UserFormProps = {
   mode: "create" | "edit";
@@ -141,7 +143,11 @@ function UserForm({ mode, initialValues, onSubmit, onCancel }: UserFormProps) {
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-1.5">
           <label className="block text-sm font-medium text-slate-700">Society ID</label>
-          <Input placeholder="Society UUID" {...register("society_id")} />
+          <Input 
+            placeholder="Society UUID" 
+            {...register("society_id")} 
+            disabled // Keep society ID locked to the admin's society
+          />
           {errors.society_id && <p className="text-xs text-red-600">{errors.society_id.message}</p>}
         </div>
         <div className="space-y-1.5">
@@ -188,20 +194,21 @@ function UserForm({ mode, initialValues, onSubmit, onCancel }: UserFormProps) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Main Page component
-// ---------------------------------------------------------------------------
-
 export default function UsersPage() {
+  const { user, isAuthenticated, isAdmin, isLoading: authLoading } = useAuth(); //
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
   const [userTypeFilter, setUserTypeFilter] = useState<UserType | "ALL">("ALL");
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogUser, setEditDialogUser] = useState<User | null>(null);
 
-  const { data: users = [], isLoading } = useQuery<User[]>({
-    queryKey: ["users"],
-    queryFn: fetchUsers,
+  /**
+   * Fetch users dynamically based on verified admin's society_id
+   */
+  const { data: users = [], isLoading: dataLoading } = useQuery<User[]>({
+    queryKey: ["users", user?.society_id],
+    queryFn: () => fetchUsers(user?.society_id || ""),
+    enabled: !!user?.society_id, // Only fetch if we have a valid society ID
   });
 
   const createMutation = useMutation({
@@ -233,12 +240,16 @@ export default function UsersPage() {
     });
   }, [users, searchTerm, userTypeFilter]);
 
+  // Handle loading and access control
+  if (authLoading) return <div className="p-8 text-center">Verifying session...</div>;
+  if (!isAuthenticated || !isAdmin) return <div className="p-8 text-center">Access denied. Admin role required.</div>;
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold">Users</h1>
-          <p className="text-slate-500">Manage your society members.</p>
+          <p className="text-slate-500">Managing members for {user?.full_name}'s Society</p>
         </div>
         <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
           <DialogTrigger asChild><Button><Plus className="mr-2 h-4 w-4" /> Create User</Button></DialogTrigger>
@@ -246,7 +257,14 @@ export default function UsersPage() {
             <DialogHeader><DialogTitle>Create New User</DialogTitle></DialogHeader>
             <UserForm
               mode="create"
-              initialValues={{ society_id: "11111111-1111-1111-1111-111111111111", full_name: "", email: "", phone: "", user_type: "OWNER", is_active: true }}
+              initialValues={{ 
+                society_id: user?.society_id || "", // Default to logged in admin's society
+                full_name: "", 
+                email: "", 
+                phone: "", 
+                user_type: "OWNER", 
+                is_active: true 
+              }}
               onSubmit={async (v) => { await createMutation.mutateAsync(v); }}
               onCancel={() => setCreateDialogOpen(false)}
             />
@@ -284,8 +302,8 @@ export default function UsersPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {isLoading ? (
-                <TableRow><TableCell colSpan={5} className="text-center">Loading...</TableCell></TableRow>
+              {dataLoading ? (
+                <TableRow><TableCell colSpan={5} className="text-center">Loading users...</TableCell></TableRow>
               ) : filteredUsers.map(user => (
                 <TableRow key={user.user_id}>
                   <TableCell className="font-medium">{user.full_name}</TableCell>
@@ -307,7 +325,6 @@ export default function UsersPage() {
         </CardContent>
       </Card>
 
-      {/* Edit Dialog */}
       <Dialog open={!!editDialogUser} onOpenChange={() => setEditDialogUser(null)}>
         <DialogContent>
           <DialogHeader><DialogTitle>Edit User</DialogTitle></DialogHeader>
