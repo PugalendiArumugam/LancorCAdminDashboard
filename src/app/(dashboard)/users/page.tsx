@@ -51,35 +51,50 @@ type User = {
 
 const API_BASE = "http://localhost:8080/api/admin/users";
 
-// Senior Dev Fix: Ensure we check both session and local storage for the token
+/**
+ * Senior Dev Fix: Centralized Header logic
+ */
 const getHeaders = () => {
-  const token = localStorage.getItem("token") || localStorage.getItem("auth_token");
-  return {
-    "Content-Type": "application/json",
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
+  const authStr = localStorage.getItem("lancorc_auth");
+  if (!authStr) {
+    console.warn("[Auth] No lancorc_auth found in localStorage");
+    return { "Content-Type": "application/json" };
+  }
+  
+  try {
+    const authData = JSON.parse(authStr);
+    const token = authData.token;
+    if (!token) throw new Error("Token missing in storage");
+    
+    return {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${token}`,
+    };
+  } catch (err) {
+    console.error("[Auth] Error parsing auth data:", err);
+    return { "Content-Type": "application/json" };
+  }
 };
 
 /**
- * API function with enhanced logging
+ * API function with enhanced logging and error capture
  */
 async function fetchUsers(societyId: string): Promise<User[]> {
-  console.log(`[API] Fetching users for Society ID: ${societyId}`);
+  console.log(`[API] Fetching users for Society: ${societyId}`);
   
   const res = await fetch(`${API_BASE}?societyId=${societyId}`, {
+    method: 'GET',
     headers: getHeaders(),
   });
 
   if (!res.ok) {
-    const err = await res.text();
-    console.error(`[API] Server Error: ${res.status}`, err);
-    throw new Error("Failed to fetch users");
+    // Senior Dev Tip: Capture the body of the error for better debugging
+    const errorText = await res.text();
+    console.error(`[API] Failed to fetch. Status: ${res.status}. Body: ${errorText}`);
+    throw new Error(errorText || "Failed to fetch users");
   }
 
   const data = await res.json();
-  console.log("[API] Raw Data received:", data);
-  
-  // Logic Fix: Ensure data is an array
   return Array.isArray(data) ? data : (data.users || []); 
 }
 
@@ -89,7 +104,11 @@ async function createUser(data: Omit<User, "user_id">): Promise<User> {
     headers: getHeaders(),
     body: JSON.stringify(data),
   });
-  if (!res.ok) throw new Error("Failed to create user");
+  
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.message || "Failed to create user");
+  }
   return res.json();
 }
 
@@ -205,18 +224,12 @@ export default function UsersPage() {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogUser, setEditDialogUser] = useState<User | null>(null);
 
-  // Monitor auth state changes
-  React.useEffect(() => {
-    console.log("[UsersPage] Auth State:", { isAuthenticated, isAdmin, societyId: user?.society_id });
-  }, [isAuthenticated, isAdmin, user]);
-
   const { data: users = [], isLoading: dataLoading, error: queryError } = useQuery<User[]>({
     queryKey: ["users", user?.society_id],
-    queryFn: async () => {
-      console.log("[UsersPage] fetchUsers called with society_id:", user?.society_id);
-      return fetchUsers(user?.society_id || "");
-    },
+    queryFn: () => fetchUsers(user?.society_id || ""),
+    // Critical Fix: Only fetch when we are 100% sure we have auth and a society ID
     enabled: !!user?.society_id && isAuthenticated,
+    retry: false, // Don't spam the server with 401s if the token is invalid
   });
 
   const createMutation = useMutation({
@@ -242,7 +255,6 @@ export default function UsersPage() {
 
   const filteredUsers = useMemo(() => {
     return users.filter(u => {
-      // Fix: Handle potential undefined fields from backend
       const name = u.full_name || (u as any).fullName || "";
       const email = u.email || "";
       const matchesSearch = !searchTerm || 
@@ -261,7 +273,7 @@ export default function UsersPage() {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold">Users</h1>
-          <p className="text-slate-500">Managing {users.length} members for Society ID: {user?.society_id}</p>
+          <p className="text-slate-500">Managing members for Society ID: {user?.society_id}</p>
         </div>
         <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
           <DialogTrigger asChild><Button><Plus className="mr-2 h-4 w-4" /> Create User</Button></DialogTrigger>
@@ -286,7 +298,7 @@ export default function UsersPage() {
 
       {queryError && (
         <div className="bg-red-50 p-4 rounded-md text-red-700 text-sm">
-          Error loading users. Please check the console and ensure the backend is running.
+          Session error: {(queryError as Error).message}. Try logging out and back in.
         </div>
       )}
 
@@ -321,9 +333,9 @@ export default function UsersPage() {
             </TableHeader>
             <TableBody>
               {dataLoading ? (
-                <TableRow><TableCell colSpan={5} className="text-center">Loading users from database...</TableCell></TableRow>
+                <TableRow><TableCell colSpan={5} className="text-center">Loading users...</TableCell></TableRow>
               ) : filteredUsers.length === 0 ? (
-                <TableRow><TableCell colSpan={5} className="text-center py-10 text-slate-400">No users found for this society.</TableCell></TableRow>
+                <TableRow><TableCell colSpan={5} className="text-center py-10 text-slate-400">No users found.</TableCell></TableRow>
               ) : filteredUsers.map(u => (
                 <TableRow key={u.user_id}>
                   <TableCell className="font-medium">{u.full_name || (u as any).fullName}</TableCell>
