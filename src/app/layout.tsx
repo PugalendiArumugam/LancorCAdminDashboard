@@ -12,7 +12,7 @@ import "./globals.css";
 const sidebarItems = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
   { name: "Users", href: "/users", icon: Users },
-  { name: "Flats", href: "#", icon: Building2, disabled: true },
+  { name: "Units", href: "/units", icon: Building2 },
   { name: "Assets", href: "#", icon: Package, disabled: true },
 ];
 
