@@ -55,6 +55,8 @@ type Unit = {
 
 const API_BASE = "http://localhost:8080/api/admin/units";
 
+const API_BASE2 = "http://localhost:8080/api/admin/users";
+
 const getHeaders = (): Record<string, string> => {
   const authStr = localStorage.getItem("lancorc_auth");
   const headers: Record<string, string> = { "Content-Type": "application/json" };
